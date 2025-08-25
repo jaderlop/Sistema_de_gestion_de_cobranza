@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey
+from sqlalchemy import Column, Integer, String, Float, Date, ForeignKey, Enum
 from sqlalchemy.orm import relationship, declarative_base
+import enum
 
 Base = declarative_base()
 
@@ -8,7 +9,7 @@ class Cliente(Base):
     id = Column(Integer, primary_key=True)
     nombre = Column(String)
     tipo_documento = Column(String)
-    numero_documento = Column(Integer, unique=True)
+    numero_documento = Column(String, unique=True, nullable=False)
     fecha_nacimiento = Column(Date)
     estado = Column(String, default="ACTIVO")  # ACTIVO o INACTIVO
     comentario = Column(String)
@@ -25,20 +26,27 @@ class Prestamo(Base):
     fecha_inicio = Column(Date)
     fecha_fin = Column(Date)
     cliente_id = Column(Integer, ForeignKey('clientes.id'))
-    interes = Column(Float)  # corregido: antes era 'intere'
+    interes = Column(Float)  # corregido: antes era 'interes'
     comentario = Column(String)
+    estado = Column(String(20), default="pendiente")
     
     cliente = relationship("Cliente", back_populates='prestamos')
     cuotas_rel = relationship("Cuota", back_populates='prestamo')  # nombre coherente
 
+class EstadoCuota(str, enum.Enum):
+    pagado = "pagado"
+    impago = "impago"
+    mora = "mora"
 
 class Cuota(Base):
     __tablename__ = 'cuotas'
     id = Column(Integer, primary_key=True)
-    numero = Column(Integer)
+    numero_cuota = Column(Integer)
     monto = Column(Float)
     fecha_vencimiento = Column(Date)
     pagado = Column(String, default="NO")
+    fecha_abono = Column(Date)
+    estado = Column(Enum(EstadoCuota), default=EstadoCuota.impago)
     comentario = Column(String)
     
     prestamo_id = Column(Integer, ForeignKey('prestamos.id'))

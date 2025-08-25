@@ -30,13 +30,30 @@ sistema-cobranza/
 ├── backend/
 │   ├── app/
 │   │   ├── models/             # Modelos de base de datos (ORM)
+│   │   │ ├── __init__.py
+│   │   │ ├── modelos.py
 │   │   ├── routes/             # Endpoints de la API
+│   │   │ ├──__init__.py
+│   │   │ ├── clientes_routes.py
+│   │   │ ├── cuotas_routes.py
+│   │   │ ├── prestamos_routes.py
 │   │   ├── services/           # Lógica de negocio (ej: generación de cuotas)
+│   │   │ ├──__init__.py
+│   │   │ ├── crud.py
 │   │   ├── controllers/        # Lógica que conecta rutas con servicios
 │   │   ├── database/           # Conexión y migraciones
+│   │   │ ├──__init__.py
+│   │   │ ├── conexiones.py
 │   │   └── utils/              # Utilidades comunes (validaciones, helpers, etc)
+│   │   └── schemas/ 
+│   │   │ ├──__init__.py
+│   │   │ ├── schemas.py
 │   ├── tests/                  # Pruebas unitarias y de integración
 │   └── main.py                 # Punto de entrada (FastAPI, Flask, etc)
+│   └── env/   
+│   └── requirements.txt
+│   └── cobranza.db
+│   └── test.db
 
 ├── frontend/
 │   ├── public/                 # Recursos estáticos (favicon, logo, etc)
@@ -103,3 +120,64 @@ sistema-cobranza/
 | Paso 4           | Validar datos y generar cuotas                 | `services/crear_cliente.py` |
 | Paso 5           | Crear consultas avanzadas                      | `routes/consultas.py`       |
 | Paso 6           | Conectar frontend con la API                   | `frontend/src/services/`    |
+0
+
+| Etapa       | Qué verás                                                                         | Carpeta                       |
+| ----------- | --------------------------------------------------------------------------------- | ----------------------------- |
+| **Paso 6**  | Conectar frontend con la API                                                      | `frontend/src/services/`      |
+| **Paso 7**  | Crear las vistas/páginas web (formulario, tabla de cuotas, etc.)                  | `frontend/src/pages/`         |
+| **Paso 8**  | Mejorar experiencia del usuario (estilos, validaciones frontend, feedback visual) | `frontend/src/components/`    |
+| **Paso 9**  | Pruebas de seguridad, validación OWASP, hashing, JWT, etc.                        | `seguridad/`                  |
+| **Paso 10** | Crear Dockerfile, docker-compose y .env.example                                   | `devops/` + raíz del proyecto |
+| **Paso 11** | Desplegar en la nube (Render, Railway, VPS, etc.)                                 | VPS o plataforma cloud        |
+| **Paso 12** | Documentar todo (API, instalación, arquitectura)                                  | `docs/` + `README.md`         |
+
+
+librerias del backend python
+**pip install sqlalchemy pydantic python-dotenv**
+
+**Una cuota teine tres cosas basicas**
+- un numero
+- un monto
+- una fecha de vencimiento
+
+uvicorn main:app --reload
+http://localhost:8000/docs
+curl http://127.0.01:8000/docs#/Clientes
+
+| # | Verificación                     | Estado |
+| - | -------------------------------- | ------ |
+| 1 | ¿Servidor levantado? (`uvicorn`) | ✅ / ❌  |
+| 2 | ¿Responde a `/docs` o `curl`?    | ✅ / ❌  |
+| 3 | ¿Base de datos funciona?         | ✅ / ❌  |
+| 4 | ¿Endpoints hacen lo que deben?   | ✅ / ❌  |
+| 5 | ¿Validación de datos correcta?   | ✅ / ❌  |
+| 6 | ¿Errores en consola?             | ✅ / ❌  |
+| 7 | ¿CRUD importado y usado?         | ✅ / ❌  |
+
+¿Servidor levantado? (`uvicorn`)
+
+.headers on
+.mode column
+.exit
+SELECT * FROM clientes;
+.tables
+.schema "nombre_de_la_tabla"
+sqlite3 /ruta_de_tu_archivo.db
+
+Estrategia por capas (recomendada)
+Schemas (Pydantic) — validación y transformaciones (capitalize, enums, formatos).
+
+Endpoints (FastAPI) — conversión JSON → schema → pasar a servicio.
+
+Services / CRUD — reglas de negocio, verificación cross-entity, transacciones.
+
+Base de datos — constraints (UNIQUE, FK, CHECK).
+
+Tests — unitarios al CRUD y tests de integración sobre los endpoints.
+
+.header on
+.mode column
+.tables
+.schema "nombre de tabla"
+

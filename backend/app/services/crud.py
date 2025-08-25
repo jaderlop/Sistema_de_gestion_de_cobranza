@@ -1,32 +1,35 @@
-from app.models.modelos import Cliente, Prestamo, Cuota
-from app.database.conexion import SessionLocal
-from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
-from app.models import Cliente
-from app.database import SessionLocal
+from app.models.modelos import Cliente, Prestamo, Cuota, EstadoCuota
+from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
+from datetime import date
+from sqlalchemy.exc import IntegrityError
+from fastapi import HTTPException
 
 # ——————————————————————————————
-# 1. Sesión
+# 1. VERIFICAR CONEXION
 # ——————————————————————————————
-def get_db() -> Session:
-    """Devuelve una sesión nueva; recuerda cerrarla cuando termines."""
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+
+def probar_conexion(db: Session):
+    return db.execute("SELECT 1").scalar()
 
 # ——————————————————————————————
 # 2. CREATE
 # ——————————————————————————————
-def crear_cliente(db: Session, nombre: str, dni: str) -> Cliente:
-    cliente = Cliente(nombre=nombre, dni=dni)
-    db.add(cliente)
-    db.commit()
-    db.refresh(cliente)   # trae el objeto con su ID y datos actualizados
-    return cliente
-
+def crear_cliente(db: Session, nombre: str, tipo_documento: str, numero_documento: int, fecha_nacimiento: date) -> Cliente:
+    try:
+        cliente = Cliente(
+            nombre=nombre, 
+            tipo_documento=tipo_documento, 
+            numero_documento=numero_documento, 
+            fecha_nacimiento=fecha_nacimiento)
+        db.add(cliente)
+        db.commit()
+        db.refresh(cliente)   # trae el objeto con su ID y datos actualizados
+        return cliente
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="El numero de docuemnto ya esta registrado")
 
 # ——————————————————————————————
 # 3. LISTAR CLIENTE
@@ -73,90 +76,158 @@ def eliminar_cliente(db: Session, cliente_id: int) -> bool:
         return True
     return False
 
-
 # ——————————————————————————————
-# 6. CREAR_PRESTAMO
+# 6. CREAR PRESTAMO Y 
 # ——————————————————————————————
-def crear_prestamo(
-    db: Session,
-    cliente_id: int,
-    monto: float,
-    cuotas: int,
-    interes: float = 0.0,
-    frecuencia: str = 'mensual'
-) -> Prestamo:
-    monto_total = round(monto * (1 + interes), 2)
-    fecha_inicio = datetime.today().date()
-    fecha_fin = fecha_inicio + relativedelta(months=+cuotas)
 
+def crear_prestamo( db: Session, 
+                   cliente_id: int, 
+                   monto_original: float, 
+                   interes: float,
+                   cuotas: int,
+                   frecuencia: str,
+                   fecha_inicio: date, 
+                   fecha_fin: date,  
+                   estado: str ="ACTIVO") -> Prestamo:
+    # 1) validaciones básicas
+    cliente = db.query(Cliente).filter(Cliente.id == cliente_id).first()
+    if not cliente:
+        raise ValueError("Cliente no encontrado")
+
+    if cuotas <= 0:
+        raise ValueError("cuotas debe ser > 0")
+    
+    if interes <0:
+        raise ValueError("El interes no puede ser negativo")
+    
+    # calculo del monto con interes
+    monto_total = monto_original * (1 + interes/100)
+
+    # 2) crear objeto Prestamo (estado inicial)
     prestamo = Prestamo(
         cliente_id=cliente_id,
-        monto_original=monto,
+        monto_original=monto_original,
         monto_final=monto_total,
+        interes=interes,
         cuotas=cuotas,
-        intere=interes,
-        frecuencia=frecuencia,
         fecha_inicio=fecha_inicio,
-        fecha_fin=fecha_fin
+        frecuencia=frecuencia,
+        fecha_fin=fecha_fin,
+        estado=estado
     )
     db.add(prestamo)
-    db.commit()
-    db.refresh(prestamo)
+    db.flush()  # asigna prestamo.id antes del commit
 
-    # Llamada a función externa
-    generar_cuotas(
-        db=db,
-        prestamo_id=prestamo.id,
-        monto=monto_total,
-        cuotas=cuotas,
-        fecha_inicio=fecha_inicio,
-        frecuencia=frecuencia
-    )
+    # 3) calcular monto de cuota (ejemplo simple: cuotas iguales sin interés compuesto)
+    # Si quieres amortización real, ver la nota abajo.
+    cuota_base = round(monto_total / cuotas, 2)
 
-    return prestamo
-
-# ——————————————————————————————
-# 7. GENARA CUOTAS
-# ——————————————————————————————
-def generar_cuotas(
-    db: Session,
-    prestamo_id: int,
-    monto: float,
-    cuotas: int,
-    fecha_inicio: date,
-    frecuencia: str = "mensual"
-) -> list[Cuota]:
-    monto_por_cuota = round(monto / cuotas, 2)
-    lista = []
-
-    for i in range(1, cuotas + 1):
-        if frecuencia == "mensual":
-            venc = fecha_inicio + relativedelta(months=+i)
-        elif frecuencia == "quincenal":
-            venc = fecha_inicio + timedelta(days=15 * i)
-        elif frecuencia == "semanal":
-            venc = fecha_inicio + timedelta(weeks=i)
-        else:
-            venc = fecha_inicio + relativedelta(months=+i)  # default
-
+    # 4) generar cuotas
+    fecha = fecha_inicio
+    for n in range(1, cuotas + 1):
         cuota = Cuota(
-            numero=i,
-            monto=monto_por_cuota,
-            fecha_vencimiento=venc,
-            pagado="NO",
-            prestamo_id=prestamo_id
+            prestamo_id=prestamo.id,
+            numero_cuota=n,
+            monto=cuota_base,
+            fecha_vencimiento=fecha,
+            estado="impago"
         )
         db.add(cuota)
-        lista.append(cuota)
+        # avanzar fecha según frecuencia
+        if frecuencia == "mensual":
+            fecha = fecha + relativedelta(months=1)
+        elif frecuencia == "semanal":
+            fecha = fecha + relativedelta(days=7)
+        else:
+            fecha = fecha + relativedelta(months=1)
 
+    # 5) commit y refrescar
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise
+    db.refresh(prestamo)
+    return prestamo
+# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
+# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
+# Limpiar y definir funciones utiles de las que no# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
+
+## pagar cuotas
+def pagar_cuota(db: Session, dni: str, numero_cuota: int, fecha_abono: date):
+    cliente = db.query(Cliente).filter(Cliente.numero_documento == dni).first()
+    if not cliente:
+        return {"error": "Cliente no encontrado"}
+    
+    db.refresh(cliente)
+
+    # Buscar las cuotas del cliente en orden
+    todas_cuotas = []
+    for prestamo in cliente.prestamos:
+        todas_cuotas.extend(prestamo.cuotas_rel)
+    
+    todas_cuotas.sort(key=lambda x: (x.prestamo_id, x.numero_cuota))
+
+    # Verificar que la cuota existe
+    cuota = next((c for c in todas_cuotas if c.numero_cuota == numero_cuota), None)
+    if not cuota:
+        return {"error": "Cuota no encontrada"}
+
+    # Validar que no se pueda pagar una cuota adelantada
+    cuotas_pendientes = [c for c in todas_cuotas if c.estado != "pagado"]
+    if not cuotas_pendientes:
+        return {"error": "El cliente ya no tiene cuotas pendientes"}
+
+    siguiente_cuota = cuotas_pendientes[0]
+    if cuota.id != siguiente_cuota.id:
+        return {"error": f"Debe pagar primero la cuota {siguiente_cuota.numero_cuota}"}
+
+    # Marcar como pagada
+    cuota.estado = "pagado"
+    cuota.fecha_abono = fecha_abono
     db.commit()
-    return lista
+    db.refresh(cuota)
 
-# ——————————————————————————————
+    return {"mensaje": f"Cuota {cuota.numero_cuota} pagada correctamente"}
+
+
+
+
+
+
+
+# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
+# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
+# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————# ——————————————————————————————
 # 8. LISTAR CUOTAS
 # ——————————————————————————————
 def listar_cuotas(db: Session) -> list[Cuota]:
     return db.query(Cuota).all()
+
+
+
+## lista do de cuotas por DNI
+def listar_cuotas_por_dni(db: Session, dni: str):
+    cliente = db.query(Cliente).filter(Cliente.numero_documento == dni).first()
+    if not cliente:
+        return None
+
+    cuotas = []
+    for prestamo in cliente.prestamos:
+        for cuota in prestamo.cuotas_rel:
+            cuotas.append({
+                "prestamo_id": prestamo.id,
+                "cuota_numero": cuota.numero_cuota,
+                "monto": cuota.monto,
+                "fecha_vencimiento": cuota.fecha_vencimiento,
+                "estado": cuota.estado
+            })
+
+    # Ordenar por préstamo y número de cuota
+    cuotas.sort(key=lambda x: (x["prestamo_id"], x["cuota_numero"]))
+    return cuotas
+
+
 
 # ——————————————————————————————
 # 9. OBTENER CUOTAS
